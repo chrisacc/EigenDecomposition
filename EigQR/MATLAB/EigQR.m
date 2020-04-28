@@ -19,7 +19,7 @@
 %test 5: Rs from experimental data:
 %Testing with experimental data:
 %Read in binary matrix
-filename='/Users/chrisacconcia/Desktop/QREigen_TransferToWorkComp/test4Rs.bin'; %128x128x1332
+filename='../../TestData/test4Rs.bin'; %'/Users/chrisacconcia/Desktop/QREigen_TransferToWorkComp/test4Rs.bin'; %128x128x1332
 %format Rs into row-major.. doesn't matter actually because it's symmetric
 fileID = fopen(filename,'r');
 
