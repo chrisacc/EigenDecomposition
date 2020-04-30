@@ -3,8 +3,8 @@ function [EigVal,Q] = DiagonalizeShiftedCPU(A,Q)
 %Keep in mind that this was just written as a stepping stone towards implementing in CUDA (i.e. not optimized for Matlab)
 
 n=size(A,1);
-MAX_ITER=10000;
-qrTol = 1e-9;eps; 
+MAX_ITER=100;
+qrTol = 1e-6;eps; 
 
 if nargin==1 %if the Q input is not provided, intitialize it to the identity matrix    
     Q=eye(n,n);

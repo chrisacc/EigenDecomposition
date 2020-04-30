@@ -31,7 +31,7 @@ Ain = Rs(:,:,101);
 %Ain=balance(Ain);
 scaling=1; max(Ain(:)); 
 Ain=Ain/scaling;
-%Ain=single(Ain);
+Ain=single(Ain);
 %cond(Ain) %characterizes how stable the matrix is: if cond(Ain)=inf, the matrix is singular. if cond(A)=1 the matrix is very stable
 %condeig(Ain)
 
@@ -39,6 +39,11 @@ disp('My func output:')
 [Atri,Qtri] = TridiagonalizeCPU(Ain);
 [Eval,Evec] = DiagonalizeShiftedCPU(Atri,Qtri);
 Evec=Evec';
+%Evec=Qtri';
+for i=1
+    delta=double(Ain)*double(Evec) - double(Evec)*double(Eval); %Drygalla 2008
+    Eval = double(Evec')*delta;
+end
 
 temp1=scaling*Ain*Evec;
 temp2=scaling*Evec*Eval;
