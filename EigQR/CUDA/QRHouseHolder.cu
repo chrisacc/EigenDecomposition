@@ -5,7 +5,7 @@
 #include <assert.h>
 #include <chrono> //for timing
 using namespace std::chrono;
-#include<cuda_profiler_api.h> 
+//#include<cuda_profiler_api.h> 
 
 #define USE_DOUBLE_PRECISION // to switch between single and double precision, can just comment this out and recompile
 #ifdef USE_DOUBLE_PRECISION
@@ -259,10 +259,10 @@ __global__ void kernel_TriDiagonalize(floating *A, floating *Q, floating *a, flo
     floating v, sig2;
     
     //store tridiagonal matrix 'T' in the form of its main diagonal (a) and sub and super diagonals (b)
-    int k;
-    for (k=0; k<n-2; k++){
+    //int k;
+    for (int k=0; k<n-2; k++){
     //for (k=0; k<32; k++){ //***testing, delete this!
-        //if (localID==k){printf("\n k = %d \n",k);}
+        //if (localID==k && blockID==0){printf("\n k = %d \n",k);}
         
         //technically, each loop, less and less threads are in use (i.e. n-k # threads: localID>=k)
                         
@@ -337,10 +337,11 @@ __global__ void kernel_TriDiagonalize(floating *A, floating *Q, floating *a, flo
             //if (localID==k){printf("W vector: \n");}
             //printf("w[%d]= %f \n",localID, w[localID]);
                        
-            
+        
         //STEP 3-update A (             
-            for (int i=k; i<n; i++){ //update one row at a time
-                A[i*n + localID + n*n*blockID] = A[i*n + localID + n*n*blockID] + w[i]*u[localID] + u[i]*w[localID];                                 
+            for (int i=k; i<n; i++){ //update one row at a time               
+                //A[i*n + localID + n*n*blockID] = A[i*n + localID + n*n*blockID] + w[i]*u[localID] + u[i]*w[localID];
+                A[i*n + localID + n*n*blockID] += w[i]*u[localID] + u[i]*w[localID];
             }           
             
             if (localID==k){
@@ -350,20 +351,19 @@ __global__ void kernel_TriDiagonalize(floating *A, floating *Q, floating *a, flo
                                    
         //STEP 4-update Q - using all threads now
         //p[localID]=0.0; 
-        p=0.0;
-        
-        //printf("p[%d] = %f \n",localID,p[localID]);
-        
+        p=0.0;        
         for (int i=k+1; i<n; i++){
             //p[localID] = p[localID] + u[i]*Q[i*n + localID + n*n*blockID]; 
-            p = p + u[i]*Q[i*n + localID + n*n*blockID];
+            //p = p + u[i]*Q[i*n + localID + n*n*blockID];
+            p += u[i]*Q[i*n + localID + n*n*blockID];
         }        
         
         //printf("p[%d] = %f \n",localID,p[localID]);
         
         for (int i=k+1; i<n; i++){
             //Q[i*n+localID + n*n*blockID] = Q[i*n+localID + n*n*blockID] - sig*u[i]*p[localID];
-            Q[i*n+localID + n*n*blockID] = Q[i*n+localID + n*n*blockID] - sig*u[i]*p; 
+            //Q[i*n+localID + n*n*blockID] = Q[i*n+localID + n*n*blockID] - sig*u[i]*p; 
+            Q[i*n+localID + n*n*blockID] -= sig*u[i]*p;
         }
         __syncthreads(); //this syncthreads is very necessary because the u[i] could be changed by a thread on the next iter 
         //note: for speed, could get around this syncthreads, if a new shared variable other than u was used to store the globally read in data from A at the begginning of each iter
@@ -380,6 +380,11 @@ __global__ void kernel_TriDiagonalize(floating *A, floating *Q, floating *a, flo
     }
     
     //__syncthreads(); printf("b[%d]= %f \n",localID, b[localID]);
+    
+//     a[localID + n*blockID]=A[localID*n + localID + n*n*blockID];
+//     if (localID<n-1){
+//     b[localID + (n-1)*blockID]=A[localID*n + localID + 1 + n*n*blockID];
+//     }
 }
 
 ////////////////////////////////////////
@@ -588,7 +593,7 @@ __global__ void kernel_DiagonalizeGivens(floating *a, floating *b, floating *Q, 
     //a - the main diagonal (n elements)
     //b - the first sub (and super) diagonal (n-1 elements)
     //Output:
-    //a - eigenvalues
+    //a - stores eigenvalues
     //Q - eigenvectors
     
     //Approach:
@@ -610,7 +615,9 @@ __global__ void kernel_DiagonalizeGivens(floating *a, floating *b, floating *Q, 
     
     //load from global to shared (n*blockID is the start index of each matrix)
     a_sh[localID] = a[localID + n*blockID]; 
+    if (localID<n-1){ // must be here to prevent out of bounds access & mem leak
     b_sh[localID] = b[localID + (n-1)*blockID];
+    }
     __syncthreads();
     
     int m=n; //initial problem size prior to any deflation
@@ -728,16 +735,21 @@ void EigQR(int n, int Nk, floating *A, floating *eigenvectors_T, floating *a)
     s_initialize_3Didentity(eigenvectors_T, n, Nk); 
     gpuErrchk(cudaMemcpy(device_eigenvectors_T, eigenvectors_T, floating_nnNk, cudaMemcpyHostToDevice));
         
-    
+    //cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte); // not on Maxwell?
     int grid_size = Nk, block_size = n; // launch as many blocks as matrices to be diagonalized, each block with a number of threads equal to the size of the matrices to be diagonalized
     kernel_TriDiagonalize<<<grid_size, block_size, 3*n*sizeof(floating)>>>(device_A, device_eigenvectors_T, device_a, device_b, n); 
+    
     //kernel_DiagonalizeHH<<<grid_size, block_size>>>(device_a, device_b, device_eigenvectors_T, n);
     kernel_DiagonalizeGivens<<<grid_size, block_size, (n + n-1)*sizeof(floating)>>>(device_a, device_b, device_eigenvectors_T, n);
     
     gpuErrchk(cudaMemcpy(A, device_A, floating_nnNk, cudaMemcpyDeviceToHost));
     gpuErrchk(cudaMemcpy(a, device_a, floating_nNk, cudaMemcpyDeviceToHost));
     gpuErrchk(cudaMemcpy(eigenvectors_T, device_eigenvectors_T, floating_nnNk, cudaMemcpyDeviceToHost));
-        
+    
+    cudaFree(device_A);
+    cudaFree(device_a);
+    cudaFree(device_b);
+    cudaFree(device_eigenvectors_T);
 }
 
 ////////////////////////////////////
@@ -772,7 +784,7 @@ int main()
     
    // /*
    printf("testing \n");
-   int n=128, Nk=16; //256; //1000;
+   int n=128, Nk=1000; //256; //1000;
    floating *A;
    float *Atemp;
    A = (floating *)malloc(sizeof(floating)*n*n*Nk);
@@ -808,14 +820,15 @@ int main()
    Ain = (floating *)malloc(sizeof(floating)*n*n*Nk);
    memcpy(Ain,A,sizeof(floating)*n*n*Nk);
    
-   cudaProfilerStart();
+   //cudaProfilerInitialize();
+   //cudaProfilerStart();
    t_begin = high_resolution_clock::now();
    
    EigQR(n, Nk, A, eigenvectors_T, a); //A becomes tri-diagonalized    
    cudaDeviceSynchronize();   
    
    t_end = high_resolution_clock::now();
-   cudaProfilerStop();
+   //cudaProfilerStop();
    
    time_span = duration_cast<duration<floating>>(t_end - t_begin);
    printf("TOTAL TIME (s):%f\n", time_span.count());  
@@ -838,7 +851,7 @@ int main()
    // /* //something in here is bad:
    printf("Calculating accuracy of method \n"); //Calculate the accuracy of the method:
    //A*V = V*D; //evaluate how close this is to being true (V is evecs, D is evals)
-   int iMatrix = 100; //which matrix to calculate accuracy of decomp
+   int iMatrix = 16; //which matrix to calculate accuracy of decomp
    if (iMatrix > Nk-1) { iMatrix = Nk - 1; }
    floating *eigenvectors_test, *eigenvectors_T_test, *eigenvalues_nn_test, *Ain_test;
    eigenvectors_test = (floating *)malloc(sizeof(floating)*n*n); 
